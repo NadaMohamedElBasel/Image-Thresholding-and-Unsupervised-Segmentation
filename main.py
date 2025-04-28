@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QApplication,QSpinBox,QDoubleSpinBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSlider, QGroupBox, QGridLayout,QGraphicsView,QFileDialog,QGraphicsScene,QGraphicsPixmapItem
+from PyQt5.QtWidgets import QApplication, QSpinBox, QDoubleSpinBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSlider, QGroupBox, QGridLayout, QGraphicsView, QFileDialog, QGraphicsScene, QGraphicsPixmapItem
 from PyQt5.QtCore import Qt
 import sys
 import cv2
@@ -9,10 +9,14 @@ import scipy
 from sklearn.cluster import MeanShift,AgglomerativeClustering
 from sklearn.cluster import estimate_bandwidth
 from skimage.io import imread, imsave
+from sklearn.cluster import KMeans
+from scipy.ndimage import label
 
 class CVApp(QWidget):
     def __init__(self):
         super().__init__()
+        self.img = None
+        self.img_gray = None
         self.initUI()
 
     def initUI(self):
@@ -51,7 +55,7 @@ class CVApp(QWidget):
         self.optimal_button = QPushButton("Optimal")
         self.optimal_button.clicked.connect(self.optimal)
         self.spectral_button = QPushButton("Spectral")
-        self.spectral_button.clicked.connect(self.spectral)
+        self.spectral_button.clicked.connect(lambda: self.spectral(self.img))
         self.local_button = QPushButton("Local")
         self.local_button.clicked.connect(self.local)
         
@@ -90,7 +94,7 @@ class CVApp(QWidget):
         # threshold_layout.addWidget(self.thresholdm2_value, 2, 3)  # Move value to column 3
 
         threshold_layout.addWidget(self.spin_block_size, 3, 1, 1, 1)  # Move below threshold sliders
-        threshold_layout.addWidget(self.spin_offset, 3, 2,1,1)  # Align offset next to spin box
+        threshold_layout.addWidget(self.spin_offset, 3, 2, 1, 1)  # Align offset next to spin box
         
         threshold_group.setLayout(threshold_layout)
         layout.addWidget(self.load_image_button)
@@ -102,11 +106,13 @@ class CVApp(QWidget):
         
         self.kmeans_button = QPushButton("K-Means")
         self.kmeans_button.clicked.connect(self.kmeans)
+        self.kmeans_button.clicked.connect(self.kmeans)
         self.mean_shift_button = QPushButton("Mean Shift")
         self.mean_shift_button.clicked.connect(self.apply_mean_shift_segmentation)
         self.agglomerative_button = QPushButton("Agglomerative")
         self.agglomerative_button.clicked.connect(self.apply_agglomerative_clustering)
         self.region_growing_button = QPushButton("Region Growing")
+        self.region_growing_button.clicked.connect(self.region_growing)
         self.region_growing_button.clicked.connect(self.region_growing)
         
         self.iterations_slider = QSlider(Qt.Horizontal)
@@ -146,7 +152,7 @@ class CVApp(QWidget):
 
         # Read and process image
         img = cv2.imread(file_path)
-        self.img=img
+        self.img = img
         self.img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert to RGB for proper display
 
@@ -863,6 +869,241 @@ class CVApp(QWidget):
         bytes_per_line = width  # Since it's grayscale, 1 byte per pixel
         q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
 
+        # Convert QImage to QPixmap and display
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+
+    def kmeans(self):
+        if self.img is None:
+            return
+        
+        # Get the number of clusters from the slider
+        num_clusters = self.clusters_slider.value()
+        
+        # Get the number of iterations from the slider
+        max_iterations = self.iterations_slider.value()
+        
+        # Prepare the image for KMeans segmentation
+        if self.img.ndim == 3:
+            # For color images, use all channels and convert from BGR to RGB
+            img_for_kmeans = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
+            # Reshape the image to a 2D array of pixels
+            pixels = img_for_kmeans.reshape((-1, 3))
+        else:
+            # For grayscale images
+            img_for_kmeans = self.img.copy()
+            # Reshape the image to a 2D array of pixels
+            pixels = img_for_kmeans.reshape((-1, 1))
+        
+        # Convert pixel values to float32 for computations
+        pixels = np.float32(pixels)
+        n_pixels = pixels.shape[0]
+        
+        # Initialize centroids by randomly choosing pixels from the image
+        indices = np.random.choice(n_pixels, num_clusters, replace=False)
+        centroids = pixels[indices]
+        
+        for i in range(max_iterations):
+            # Compute Euclidean distances between pixels and centroids
+            # The result is a (n_pixels x num_clusters) array
+            distances = np.linalg.norm(pixels[:, np.newaxis] - centroids, axis=2)
+            # Assign each pixel to the closest centroid
+            labels = np.argmin(distances, axis=1)
+            
+            # Recompute centroids as the mean of all pixels assigned to each cluster
+            new_centroids = []
+            for k in range(num_clusters):
+                if np.any(labels == k):
+                    new_centroid = pixels[labels == k].mean(axis=0)
+                else:
+                    # If a centroid loses all assigned pixels, keep the previous value
+                    new_centroid = centroids[k]
+                new_centroids.append(new_centroid)
+            new_centroids = np.array(new_centroids, dtype=np.float32)
+            
+            # If centroids do not change much, break early
+            if np.allclose(centroids, new_centroids, atol=1e-4):
+                break
+            centroids = new_centroids
+        
+        # Create the segmented image by replacing each pixel with its centroid value
+        segmented_pixels = centroids[labels]
+        segmented_pixels = np.uint8(segmented_pixels)
+        
+        if self.img.ndim == 3:
+            segmented_img = segmented_pixels.reshape(img_for_kmeans.shape)
+            # For display consistency, convert from RGB to BGR and back to RGB
+            segmented_img = cv2.cvtColor(segmented_img, cv2.COLOR_RGB2BGR)
+            display_img = cv2.cvtColor(segmented_img, cv2.COLOR_BGR2RGB)
+            height, width, channel = display_img.shape
+            bytes_per_line = 3 * width
+            q_image = QImage(display_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        else:
+            segmented_img = segmented_pixels.reshape(img_for_kmeans.shape)
+            height, width = segmented_img.shape
+            bytes_per_line = width  # Grayscale: 1 byte per pixel
+            q_image = QImage(segmented_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+        
+        # Display the result
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+
+    def region_growing(self):
+        if self.img is None:
+            return
+        
+        # Get the image in grayscale
+        if self.img.ndim == 3:
+            img_gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        else:
+            img_gray = self.img.copy()
+        
+        # Get threshold value from slider for similarity criterion
+        tolerance = self.threshold_slider.value()
+        if tolerance == 0:
+            tolerance = 10  # Default tolerance if slider is at 0
+        
+        # Get the dimensions of the image
+        height, width = img_gray.shape
+        
+        # Initialize segmentation result
+        segmented = np.zeros_like(img_gray, dtype=np.uint8)
+        visited = np.zeros_like(img_gray, dtype=bool)
+        
+        # Calculate seed points
+        # We'll place seeds in a grid pattern across the image
+        grid_size = 30  # Distance between seed points
+        region_id = 1
+        
+        for y in range(0, height, grid_size):
+            for x in range(0, width, grid_size):
+                if not visited[y, x]:
+                    # Initialize region growing from this seed
+                    region = np.zeros_like(img_gray, dtype=bool)
+                    stack = [(y, x)]
+                    seed_value = int(img_gray[y, x])
+                    
+                    while stack:
+                        cy, cx = stack.pop()
+                        
+                        # Skip if outside image bounds or already visited
+                        if (cy < 0 or cy >= height or cx < 0 or cx >= width or 
+                                visited[cy, cx] or region[cy, cx]):
+                            continue
+                        
+                        # Check if pixel is similar to seed
+                        current_value = int(img_gray[cy, cx])
+                        if abs(current_value - seed_value) <= tolerance:
+                            region[cy, cx] = True
+                            visited[cy, cx] = True
+                            
+                            # Add neighbors to stack
+                            stack.append((cy-1, cx))  # Up
+                            stack.append((cy+1, cx))  # Down
+                            stack.append((cy, cx-1))  # Left
+                            stack.append((cy, cx+1))  # Right
+                    
+                    # Add the region to the segmentation result
+                    if np.any(region):
+                        segmented[region] = region_id
+                        region_id += 1
+        
+        # Scale to 0-255 for better visualization
+        if np.max(segmented) > 0:
+            scale_factor = 255.0 / np.max(segmented)
+            segmented = (segmented * scale_factor).astype(np.uint8)
+        
+        # Apply a random color to each region for better visualization
+        if region_id > 1:
+            # Create a colormap
+            colormap = np.zeros((region_id, 3), dtype=np.uint8)
+            # First region is background (black)
+            colormap[1:] = np.random.randint(0, 255, size=(region_id-1, 3))
+            
+            # Create colored segmentation
+            colored_segmentation = np.zeros((height, width, 3), dtype=np.uint8)
+            for i in range(1, region_id):
+                colored_segmentation[segmented == int(i * scale_factor)] = colormap[i]
+            
+            # Convert to QImage for display
+            colored_rgb = cv2.cvtColor(colored_segmentation, cv2.COLOR_BGR2RGB)
+            q_image = QImage(colored_rgb.data, width, height, 3 * width, QImage.Format_RGB888)
+        else:
+            # Grayscale output if no regions found
+            q_image = QImage(segmented.data, width, height, width, QImage.Format_Grayscale8)
+        
+        # Convert QImage to QPixmap and display
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+
+    def mean_shift(self):
+        # Placeholder for mean shift segmentation
+        if self.img is None:
+            return
+        
+        # Simple placeholder implementation
+        if self.img.ndim == 3:
+            # For simplicity, use OTSU on each channel and combine
+            b, g, r = cv2.split(self.img)
+            _, b_thresh = cv2.threshold(b, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            _, g_thresh = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            _, r_thresh = cv2.threshold(r, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            result = cv2.merge([b_thresh, g_thresh, r_thresh])
+            result_rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+            
+            height, width, channel = result_rgb.shape
+            bytes_per_line = 3 * width
+            q_image = QImage(result_rgb.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        else:
+            # Just use OTSU for grayscale
+            _, result = cv2.threshold(self.img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            height, width = result.shape
+            bytes_per_line = width
+            q_image = QImage(result.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+        
+        # Display result
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+
+    def agglomerative(self):
+        # Placeholder for agglomerative segmentation
+        if self.img is None:
+            return
+        
+        # Simple placeholder using regions from otsu
+        if self.img.ndim == 3:
+            img_gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        else:
+            img_gray = self.img.copy()
+        
+        # Apply OTSU
+        _, binary = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Label connected components
+        labeled, num_features = label(binary)
+        
+        # Scale to 0-255 for visualization
+        if num_features > 0:
+            scale_factor = 255.0 / num_features
+            labeled_display = (labeled * scale_factor).astype(np.uint8)
+        else:
+            labeled_display = binary
+        
+        # Display result
+        height, width = labeled_display.shape
+        bytes_per_line = width
+        q_image = QImage(labeled_display.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+        
         # Convert QImage to QPixmap and display
         q_pixmap = QPixmap.fromImage(q_image)
         scene = QGraphicsScene()
