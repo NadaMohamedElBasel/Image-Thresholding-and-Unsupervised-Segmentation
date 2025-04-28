@@ -447,7 +447,7 @@ class CVApp(QWidget):
         
         # Prepare the image for KMeans segmentation
         if self.img.ndim == 3:
-            # For color images, use all channels
+            # For color images, use all channels and convert from BGR to RGB
             img_for_kmeans = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
             # Reshape the image to a 2D array of pixels
             pixels = img_for_kmeans.reshape((-1, 3))
@@ -456,35 +456,57 @@ class CVApp(QWidget):
             img_for_kmeans = self.img.copy()
             # Reshape the image to a 2D array of pixels
             pixels = img_for_kmeans.reshape((-1, 1))
-            
-        # Convert to float for better precision
+        
+        # Convert pixel values to float32 for computations
         pixels = np.float32(pixels)
+        n_pixels = pixels.shape[0]
         
-        # Define criteria and apply KMeans
-        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, max_iterations, 0.2)
-        _, labels, centers = cv2.kmeans(pixels, num_clusters, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+        # Initialize centroids by randomly choosing pixels from the image
+        indices = np.random.choice(n_pixels, num_clusters, replace=False)
+        centroids = pixels[indices]
         
-        # Convert back to uint8 and reshape back to the original image shape
-        centers = np.uint8(centers)
-        segmented_img = centers[labels.flatten()]
+        for i in range(max_iterations):
+            # Compute Euclidean distances between pixels and centroids
+            # The result is a (n_pixels x num_clusters) array
+            distances = np.linalg.norm(pixels[:, np.newaxis] - centroids, axis=2)
+            # Assign each pixel to the closest centroid
+            labels = np.argmin(distances, axis=1)
+            
+            # Recompute centroids as the mean of all pixels assigned to each cluster
+            new_centroids = []
+            for k in range(num_clusters):
+                if np.any(labels == k):
+                    new_centroid = pixels[labels == k].mean(axis=0)
+                else:
+                    # If a centroid loses all assigned pixels, keep the previous value
+                    new_centroid = centroids[k]
+                new_centroids.append(new_centroid)
+            new_centroids = np.array(new_centroids, dtype=np.float32)
+            
+            # If centroids do not change much, break early
+            if np.allclose(centroids, new_centroids, atol=1e-4):
+                break
+            centroids = new_centroids
+        
+        # Create the segmented image by replacing each pixel with its centroid value
+        segmented_pixels = centroids[labels]
+        segmented_pixels = np.uint8(segmented_pixels)
         
         if self.img.ndim == 3:
-            segmented_img = segmented_img.reshape(self.img.shape)
-            # Convert from RGB to BGR for OpenCV
+            segmented_img = segmented_pixels.reshape(img_for_kmeans.shape)
+            # For display consistency, convert from RGB to BGR and back to RGB
             segmented_img = cv2.cvtColor(segmented_img, cv2.COLOR_RGB2BGR)
-            
-            # Convert to RGB for display
             display_img = cv2.cvtColor(segmented_img, cv2.COLOR_BGR2RGB)
             height, width, channel = display_img.shape
             bytes_per_line = 3 * width
             q_image = QImage(display_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
         else:
-            segmented_img = segmented_img.reshape(self.img.shape)
+            segmented_img = segmented_pixels.reshape(img_for_kmeans.shape)
             height, width = segmented_img.shape
-            bytes_per_line = width
+            bytes_per_line = width  # Grayscale: 1 byte per pixel
             q_image = QImage(segmented_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
         
-        # Convert QImage to QPixmap and display
+        # Display the result
         q_pixmap = QPixmap.fromImage(q_image)
         scene = QGraphicsScene()
         scene.addItem(QGraphicsPixmapItem(q_pixmap))
