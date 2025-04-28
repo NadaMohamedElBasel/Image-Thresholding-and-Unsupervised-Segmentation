@@ -45,7 +45,9 @@ class CVApp(QWidget):
         self.otsu_button = QPushButton("OTSU")
         self.otsu_button.clicked.connect(self.otsu)
         self.optimal_button = QPushButton("Optimal")
+        self.optimal_button.clicked.connect(self.optimal)
         self.spectral_button = QPushButton("Spectral")
+        self.spectral_button.clicked.connect(self.spectral)
         self.local_button = QPushButton("Local")
         self.local_button.clicked.connect(self.local)
         
@@ -151,6 +153,61 @@ class CVApp(QWidget):
         scene.addItem(QGraphicsPixmapItem(q_pixmap))
         self.input_view.setScene(scene)
 
+    def optimal(self):
+        if self.img is None:
+            return
+        if self.img.ndim == 3:
+            img_proc = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        else:
+            img_proc = self.img.copy()
+
+        cornerSize = 10  # Corner size
+
+        top_left = img_proc[:cornerSize, :cornerSize]
+        top_right = img_proc[:cornerSize, -cornerSize:]
+        bottom_left = img_proc[-cornerSize:, :cornerSize]
+        bottom_right = img_proc[-cornerSize:, -cornerSize:]
+
+        corners = np.hstack((top_left.ravel(), top_right.ravel(),
+                             bottom_left.ravel(), bottom_right.ravel()))
+
+        threshold = np.mean(corners)
+
+        img = img_proc
+        for _ in range(100):
+            background = img[img <= threshold]
+            object = img[img > threshold]
+
+            if len(background) == 0 or len(object) == 0:
+                break  # Avoid division by zero
+
+            # Compute means
+            mu_b = np.mean(background)
+            mu_o = np.mean(object)
+
+            # Update threshold
+            threshold_new = (mu_b + mu_o) / 2
+
+            # Check for convergence
+            if abs(threshold - threshold_new) < 0.1:
+                break
+            threshold = threshold_new
+
+        thresh_img = (img_proc > threshold).astype(np.uint8) * 255
+
+        # Convert NumPy array to QImage
+        height, width = thresh_img.shape
+        bytes_per_line = width  # Since it's grayscale, 1 byte per pixel
+        q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+
+        # Convert QImage to QPixmap and display
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+
+
+
     def otsu(self):
         if self.img is None:
             return
@@ -191,7 +248,157 @@ class CVApp(QWidget):
         scene.addItem(QGraphicsPixmapItem(q_pixmap))
         self.output_view.setScene(scene)
 
-    def local(self):# adaptive mean thresholding 
+    def spectral(self, image, num_bands=3, max_iterations=5):
+
+        if len(image.shape) > 2:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # Create multiple spectral bands from the input image
+        bands = [image]
+        for i in range(1, num_bands):
+            kernel_size = 2 * i + 1  # Ensure odd kernel size
+            bands.append(cv2.GaussianBlur(image, (kernel_size, kernel_size), 0))
+
+        # Initialize the whole image as a single region
+        height, width = image.shape
+        segmentation_result = np.zeros((height, width), dtype=np.uint8)
+        regions = [np.ones((height, width), dtype=bool)]
+        region_id = 1
+
+        # Process each iteration
+        for iteration in range(max_iterations):
+            new_regions = []
+
+            if not regions:  # If no regions left, we're done
+                break
+
+            for region_mask in regions:
+                should_segment_further = True
+
+                # Process each band
+                sub_regions_per_band = []
+                for band in bands:
+                    # Get region pixels
+                    region_pixels = band[region_mask]
+
+                    if len(region_pixels) == 0:
+                        should_segment_further = False
+                        break
+
+                    # Compute histogram
+                    hist = cv2.calcHist([region_pixels], [0], None, [256], [0, 256])
+                    hist = hist.flatten() / len(region_pixels)  # Normalize
+
+                    # Apply Gaussian smoothing to histogram
+                    hist_smoothed = cv2.GaussianBlur(hist, (5, 1), 0)
+
+                    # Find peaks (local maxima)
+                    peaks = []
+                    for i in range(1, len(hist_smoothed) - 1):
+                        if hist_smoothed[i] > hist_smoothed[i - 1] and hist_smoothed[i] > hist_smoothed[i + 1]:
+                            peaks.append((i, hist_smoothed[i]))
+
+                    # If no peaks or only one peak, can't segment further
+                    if len(peaks) <= 1:
+                        should_segment_further = False
+                        break
+
+                    # Find most significant peak
+                    significant_peak_idx = max(peaks, key=lambda x: x[1])[0]
+
+                    # Find local minima on either side of the peak
+                    left_min_idx = None
+                    for i in range(significant_peak_idx, 0, -1):
+                        if hist_smoothed[i] < hist_smoothed[i - 1] and hist_smoothed[i] < hist_smoothed[i + 1]:
+                            left_min_idx = i
+                            break
+
+                    right_min_idx = None
+                    for i in range(significant_peak_idx, len(hist_smoothed) - 1):
+                        if hist_smoothed[i] < hist_smoothed[i - 1] and hist_smoothed[i] < hist_smoothed[i + 1]:
+                            right_min_idx = i
+                            break
+
+                    # If couldn't find minima, can't segment further
+                    if left_min_idx is None or right_min_idx is None:
+                        should_segment_further = False
+                        break
+
+                    # Create new sub-regions
+                    left_mask = np.zeros_like(region_mask, dtype=bool)
+                    middle_mask = np.zeros_like(region_mask, dtype=bool)
+                    right_mask = np.zeros_like(region_mask, dtype=bool)
+
+                    # Apply thresholds
+                    region_indices = np.where(region_mask)
+                    for i in range(len(region_indices[0])):
+                        y, x = region_indices[0][i], region_indices[1][i]
+                        pixel_value = band[y, x]
+
+                        if pixel_value < left_min_idx:
+                            left_mask[y, x] = True
+                        elif pixel_value > right_min_idx:
+                            right_mask[y, x] = True
+                        else:
+                            middle_mask[y, x] = True
+
+                    # Add sub-regions to the list
+                    band_regions = [left_mask, middle_mask, right_mask]
+                    sub_regions_per_band.append(band_regions)
+
+                # If no further segmentation is possible, mark current region with ID
+                if not should_segment_further:
+                    segmentation_result[region_mask] = region_id
+                    region_id += 1
+                    continue
+
+                # Combine sub-regions from different bands
+                # Start with the first band's regions
+                combined_regions = sub_regions_per_band[0]
+
+                # Intersect with regions from other bands
+                for band_idx in range(1, len(bands)):
+                    new_combined_regions = []
+                    for region1 in combined_regions:
+                        for region2 in sub_regions_per_band[band_idx]:
+                            intersection = np.logical_and(region1, region2)
+                            if np.any(intersection):
+                                new_combined_regions.append(intersection)
+                    combined_regions = new_combined_regions
+
+                # Add combined regions to the list for next iteration
+                for region in combined_regions:
+                    if np.any(region):
+                        new_regions.append(region)
+
+            # If no new regions were created, we're done
+            if not new_regions:
+                break
+
+            regions = new_regions
+
+        # Label any remaining regions
+        for region_mask in regions:
+            segmentation_result[region_mask] = region_id
+            region_id += 1
+
+        # Scale to 0-255 for display
+        if np.max(segmentation_result) > 0:
+            # Calculate scaling factor to distribute values evenly across 0-255
+            scale_factor = 255.0 / np.max(segmentation_result)
+            segmentation_result = (segmentation_result * scale_factor).astype(np.uint8)
+
+            thresh_img = segmentation_result
+            height, width = thresh_img.shape
+            bytes_per_line = width  # Since it's grayscale, 1 byte per pixel
+            q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+
+            # Convert QImage to QPixmap and display
+            q_pixmap = QPixmap.fromImage(q_image)
+            scene = QGraphicsScene()
+            scene.addItem(QGraphicsPixmapItem(q_pixmap))
+            self.output_view.setScene(scene)
+    def local(self):# adaptive mean thresholding
         if self.img is None:
             return
         if self.img.ndim == 3:
