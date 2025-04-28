@@ -2,9 +2,13 @@ from PyQt5.QtWidgets import QApplication,QSpinBox,QDoubleSpinBox, QWidget, QVBox
 from PyQt5.QtCore import Qt
 import sys
 import cv2
+import matplotlib.pyplot as plt
 from PyQt5.QtGui import QPixmap,QImage,QPainter, QPen
 import numpy as np
 import scipy
+from sklearn.cluster import MeanShift,AgglomerativeClustering
+from sklearn.cluster import estimate_bandwidth
+from skimage.io import imread, imsave
 
 class CVApp(QWidget):
     def __init__(self):
@@ -56,10 +60,10 @@ class CVApp(QWidget):
         self.threshold_value = QLabel("0")
         self.threshold_slider.valueChanged.connect(lambda: self.threshold_value.setText(str(self.threshold_slider.value())))
         
-        self.thresholdm2_slider = QSlider(Qt.Horizontal)
-        self.thresholdm2_slider.setRange(0, 255)
-        self.thresholdm2_value = QLabel("0")
-        self.thresholdm2_slider.valueChanged.connect(lambda: self.thresholdm2_value.setText(str(self.thresholdm2_slider.value())))
+        # self.thresholdm2_slider = QSlider(Qt.Horizontal)
+        # self.thresholdm2_slider.setRange(0, 255)
+        # self.thresholdm2_value = QLabel("0")
+        # self.thresholdm2_slider.valueChanged.connect(lambda: self.thresholdm2_value.setText(str(self.thresholdm2_slider.value())))
 
         # Local threshold parameters: block size and offset
         self.spin_block_size = QSpinBox()
@@ -81,9 +85,9 @@ class CVApp(QWidget):
         threshold_layout.addWidget(self.threshold_slider, 1, 1, 1, 2)  # Slider spans 2 columns
         threshold_layout.addWidget(self.threshold_value, 1, 3)  # Move value to column 3
 
-        threshold_layout.addWidget(QLabel("Threshold 2:"), 2, 0)
-        threshold_layout.addWidget(self.thresholdm2_slider, 2, 1, 1, 2)  # Slider spans 2 columns
-        threshold_layout.addWidget(self.thresholdm2_value, 2, 3)  # Move value to column 3
+        # threshold_layout.addWidget(QLabel("Threshold 2:"), 2, 0)
+        # threshold_layout.addWidget(self.thresholdm2_slider, 2, 1, 1, 2)  # Slider spans 2 columns
+        # threshold_layout.addWidget(self.thresholdm2_value, 2, 3)  # Move value to column 3
 
         threshold_layout.addWidget(self.spin_block_size, 3, 1, 1, 1)  # Move below threshold sliders
         threshold_layout.addWidget(self.spin_offset, 3, 2,1,1)  # Align offset next to spin box
@@ -97,19 +101,25 @@ class CVApp(QWidget):
         segmentation_layout = QGridLayout()
         
         self.kmeans_button = QPushButton("K-Means")
+        self.kmeans_button.clicked.connect(self.kmeans)
         self.mean_shift_button = QPushButton("Mean Shift")
+        self.mean_shift_button.clicked.connect(self.apply_mean_shift_segmentation)
         self.agglomerative_button = QPushButton("Agglomerative")
+        self.agglomerative_button.clicked.connect(self.apply_agglomerative_clustering)
         self.region_growing_button = QPushButton("Region Growing")
+        self.region_growing_button.clicked.connect(self.region_growing)
         
         self.iterations_slider = QSlider(Qt.Horizontal)
         self.iterations_slider.setRange(1, 100)
-        self.iterations_value = QLabel("1")
+        self.iterations_value = QLabel("5")
         self.iterations_slider.valueChanged.connect(lambda: self.iterations_value.setText(str(self.iterations_slider.value())))
+        self.iterations_slider.setValue(5)  # Default value
         
         self.clusters_slider = QSlider(Qt.Horizontal)
         self.clusters_slider.setRange(1, 10)
-        self.clusters_value = QLabel("1")
+        self.clusters_value = QLabel("3")
         self.clusters_slider.valueChanged.connect(lambda: self.clusters_value.setText(str(self.clusters_slider.value())))
+        self.clusters_slider.setValue(3)
         
         segmentation_layout.addWidget(self.kmeans_button, 0, 0)
         segmentation_layout.addWidget(self.mean_shift_button, 0, 1)
@@ -153,13 +163,445 @@ class CVApp(QWidget):
         scene.addItem(QGraphicsPixmapItem(q_pixmap))
         self.input_view.setScene(scene)
 
+
+    # def apply_mean_shift_segmentation(self):
+    #     if not hasattr(self, 'img') or self.img is None:
+    #         print("No image loaded!")
+    #         return
+
+    #     # Convert to RGB if needed
+    #     image = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
+        
+    #     # Convert to LAB
+    #     lab_image = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+
+    #     height, width, _ = image.shape
+
+    #     # Flatten LAB image
+    #     flat_image = lab_image.reshape((-1, 3))
+
+    #     # Generate x, y coordinates
+    #     x, y = np.meshgrid(np.arange(width), np.arange(height))
+    #     x = (x / width) * 255  # Normalize x
+    #     y = (y / height) * 255 # Normalize y
+
+    #     # Stack LAB + normalized spatial coordinates
+    #     flat_image_with_coordinates = np.column_stack([flat_image, x.flatten(), y.flatten()])
+
+    #     # Estimate bandwidth
+    #     bandwidth = estimate_bandwidth(flat_image_with_coordinates, quantile=0.1, n_samples=1000)
+
+    #     # Mean Shift
+    #     mean_shift = MeanShift(bandwidth=bandwidth, bin_seeding=True)
+    #     mean_shift.fit(flat_image_with_coordinates)
+
+    #     # Get labels
+    #     labels = mean_shift.labels_
+    #     segmented_image = labels.reshape((height, width))
+
+    #     # Color segmented image
+    #     unique_labels = np.unique(labels)
+    #     segmented_colors = np.random.randint(0, 255, size=(len(unique_labels), 3))
+    #     colored_segmented_image = segmented_colors[segmented_image]
+
+    #     # Prepare for QImage display
+    #     colored_segmented_image = np.clip(colored_segmented_image, 0, 255).astype(np.uint8)
+    #     height, width, _ = colored_segmented_image.shape
+    #     bytes_per_line = 3 * width
+    #     q_image = QImage(colored_segmented_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+
+    #     # Display
+    #     q_pixmap = QPixmap.fromImage(q_image)
+    #     scene = QGraphicsScene()
+    #     scene.addItem(QGraphicsPixmapItem(q_pixmap))
+    #     self.output_view.setScene(scene)
+
+    # def apply_mean_shift_segmentation(self, spatial_radius=6, color_radius=4.5, max_iter=300):
+    #     """
+    #     Apply Mean Shift segmentation to an image.
+        
+    #     Parameters:
+    #     - image: Input image (H, W, 3) in uint8
+    #     - spatial_radius: The spatial window radius.
+    #     - color_radius: The color window radius.
+    #     - max_iter: Maximum number of iterations for convergence.
+
+    #     Returns:
+    #     - segmented_image: Output segmented image
+    #     """
+    #     # Resize for faster processing if needed (optional)
+    #     # image = cv2.resize(image, (width, height))
+    #     if not hasattr(self, 'img') or self.img is None:
+    #         print("No image loaded!")
+    #         return
+    #     # Convert to RGB if needed
+    #     image = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
+    #     # Convert image to (N, 5) where N = H*W, features = (r, g, b, x, y)
+    #     h, w, c = image.shape
+    #     X = np.zeros((h * w, 5), dtype=np.float32)
+    #     for i in range(h):
+    #         for j in range(w):
+    #             r, g, b = image[i, j]
+    #             X[i * w + j] = np.array([r, g, b, spatial_radius * i / h, spatial_radius * j / w])
+
+    #     # Estimate bandwidth
+    #     bandwidth = estimate_bandwidth(X, quantile=0.1, n_samples=500)
+    #     if bandwidth <= 0:
+    #         bandwidth = 1  # Avoid zero bandwidth error
+    #     # MeanShift clustering
+    #     ms = MeanShift(bandwidth=bandwidth, bin_seeding=True, max_iter=max_iter)
+    #     ms.fit(X)
+    #     labels = ms.labels_
+    #     cluster_centers = ms.cluster_centers_
+    #     # Build the segmented image
+    #     segmented_image = np.zeros((h, w, 3), dtype=np.uint8)
+    #     for i in range(h):
+    #         for j in range(w):
+    #             label = labels[i * w + j]
+    #             r, g, b, _, _ = cluster_centers[label]
+    #             segmented_image[i, j] = [int(r), int(g), int(b)]
+
+    #         # Prepare for QImage display
+    #     segmented_image = np.clip(segmented_image, 0, 255).astype(np.uint8)
+    #     height, width, _ = segmented_image.shape
+    #     bytes_per_line = 3 * width
+    #     q_image = QImage(segmented_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+    #     # Display
+    #     q_pixmap = QPixmap.fromImage(q_image)
+    #     scene = QGraphicsScene()
+    #     scene.addItem(QGraphicsPixmapItem(q_pixmap))
+    #     self.output_view.setScene(scene)
+
+    #     return segmented_image
+
+    def apply_mean_shift_segmentation(self):
+        if not hasattr(self, 'img') or self.img is None:
+            print("No image loaded!")
+            return
+
+        # Parameters
+        bandwidth = 30  # Bandwidth radius for shifting (you can tune this)
+        #max_iterations = 5
+        max_iterations = self.iterations_slider.value()  # Get from slider
+        convergence_threshold = 1  # Threshold for mean shift convergence
+
+        # Prepare image
+        image = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
+        resized_image = cv2.resize(image, (256, 256))
+        flattened_image = np.copy(resized_image.reshape((-1, 3)))
+
+        shifted_points = np.copy(flattened_image)
+
+        for iteration in range(max_iterations):
+            new_points = []
+            for point in shifted_points:
+                # Find all points within bandwidth
+                distances = np.linalg.norm(flattened_image - point, axis=1)
+                within_bandwidth = flattened_image[distances < bandwidth]
+
+                if len(within_bandwidth) > 0:
+                    # Mean shift: move to the mean of nearby points
+                    mean_point = np.mean(within_bandwidth, axis=0)
+                    new_points.append(mean_point)
+                else:
+                    # If no nearby points, stay the same
+                    new_points.append(point)
+
+            new_points = np.array(new_points)
+
+            # Check convergence
+            shift_distances = np.linalg.norm(new_points - shifted_points, axis=1)
+            if np.max(shift_distances) < convergence_threshold:
+                print(f"Converged after {iteration+1} iterations.")
+                break
+
+            shifted_points = new_points
+
+        # After convergence, assign each pixel to its nearest mode
+        final_pixels = []
+        for p in shifted_points:
+            final_pixels.append(np.round(p))
+        final_pixels = np.array(final_pixels, np.uint8)
+        output_image = final_pixels.reshape(resized_image.shape)
+
+        # Display the result
+        height, width, _ = output_image.shape
+        bytes_per_line = 3 * width
+        q_image = QImage(output_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+
+
+##############################################################################################################################
+    def kmeans(self):
+        if self.img is None:
+            return
+        
+        # Get the number of clusters from the slider
+        num_clusters = self.clusters_slider.value()
+        
+        # Get the number of iterations from the slider
+        max_iterations = self.iterations_slider.value()
+        
+        # Prepare the image for KMeans segmentation
+        if self.img.ndim == 3:
+            # For color images, use all channels and convert from BGR to RGB
+            img_for_kmeans = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
+            # Reshape the image to a 2D array of pixels
+            pixels = img_for_kmeans.reshape((-1, 3))
+        else:
+            # For grayscale images
+            img_for_kmeans = self.img.copy()
+            # Reshape the image to a 2D array of pixels
+            pixels = img_for_kmeans.reshape((-1, 1))
+        
+        # Convert pixel values to float32 for computations
+        pixels = np.float32(pixels)
+        n_pixels = pixels.shape[0]
+        
+        # Initialize centroids by randomly choosing pixels from the image
+        indices = np.random.choice(n_pixels, num_clusters, replace=False)
+        centroids = pixels[indices]
+        
+        for i in range(max_iterations):
+            # Compute Euclidean distances between pixels and centroids
+            # The result is a (n_pixels x num_clusters) array
+            distances = np.linalg.norm(pixels[:, np.newaxis] - centroids, axis=2)
+            # Assign each pixel to the closest centroid
+            labels = np.argmin(distances, axis=1)
+            
+            # Recompute centroids as the mean of all pixels assigned to each cluster
+            new_centroids = []
+            for k in range(num_clusters):
+                if np.any(labels == k):
+                    new_centroid = pixels[labels == k].mean(axis=0)
+                else:
+                    # If a centroid loses all assigned pixels, keep the previous value
+                    new_centroid = centroids[k]
+                new_centroids.append(new_centroid)
+            new_centroids = np.array(new_centroids, dtype=np.float32)
+            
+            # If centroids do not change much, break early
+            if np.allclose(centroids, new_centroids, atol=1e-4):
+                break
+            centroids = new_centroids
+        
+        # Create the segmented image by replacing each pixel with its centroid value
+        segmented_pixels = centroids[labels]
+        segmented_pixels = np.uint8(segmented_pixels)
+        
+        if self.img.ndim == 3:
+            segmented_img = segmented_pixels.reshape(img_for_kmeans.shape)
+            # For display consistency, convert from RGB to BGR and back to RGB
+            segmented_img = cv2.cvtColor(segmented_img, cv2.COLOR_RGB2BGR)
+            display_img = cv2.cvtColor(segmented_img, cv2.COLOR_BGR2RGB)
+            height, width, channel = display_img.shape
+            bytes_per_line = 3 * width
+            q_image = QImage(display_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        else:
+            segmented_img = segmented_pixels.reshape(img_for_kmeans.shape)
+            height, width = segmented_img.shape
+            bytes_per_line = width  # Grayscale: 1 byte per pixel
+            q_image = QImage(segmented_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+        
+        # Display the result
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+############################################# Agglomerative Clustering #######################################################
+    clusters_list = []
+    cluster = {}
+    centers = {}
+
+    def calculate_distance(self,x1, x2):
+        return np.sqrt(np.sum((x1 - x2) ** 2))
+
+    def clusters_average_distance(self,cluster1, cluster2):
+    
+        cluster1_center = np.average(cluster1)
+        cluster2_center = np.average(cluster2)
+        return self.calculate_distance(cluster1_center, cluster2_center) 
+
+    def initial_clusters(self,image_clusters):
+    
+        global initial_k
+        groups = {}
+        cluster_color = int(256 / initial_k)
+        for i in range(initial_k):
+            color = i * cluster_color
+            groups[(color, color, color)] = []
+        for i, p in enumerate(image_clusters):
+            go = min(groups.keys(), key=lambda c: np.sqrt(np.sum((p - c) ** 2)))
+            groups[go].append(p)
+        return [group for group in groups.values() if len(group) > 0]
+
+    def get_cluster_center( self,point):
+        global cluster
+        point_cluster_num = self.cluster[tuple(point)]
+        center = self.centers[point_cluster_num]
+        return center
+
+    def get_clusters(self,image_clusters):
+        global clusters_list
+        clusters_list = self.initial_clusters(image_clusters)
+
+        while len(clusters_list) > clusters_number:
+            cluster1, cluster2 = min(
+                [(c1, c2) for i, c1 in enumerate(clusters_list) for c2 in clusters_list[:i]],
+                key=lambda c: self.clusters_average_distance(c[0], c[1]))
+
+            clusters_list = [cluster_itr for cluster_itr in clusters_list if cluster_itr != cluster1 and cluster_itr != cluster2]
+
+            merged_cluster = cluster1 + cluster2
+
+            clusters_list.append(merged_cluster)
+
+        global cluster 
+        for cl_num, cl in enumerate(clusters_list):
+            for point in cl:
+                self.cluster[tuple(point)] = cl_num
+
+        global centers 
+        for cl_num, cl in enumerate(clusters_list):
+            self.centers[cl_num] = np.average(cl, axis=0)
+
+    def apply_agglomerative_clustering(self):
+        global clusters_number
+        global initial_k
+        if not hasattr(self, 'img') or self.img is None:
+            print("No image loaded!")
+            return
+        # Convert to RGB if needed
+        image = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
+        initial_number_of_clusters=3
+        resized_image = cv2.resize(image, (256,256))
+
+        clusters_number = self.clusters_slider.value()
+        initial_k = initial_number_of_clusters 
+        flattened_image = np.copy(resized_image.reshape((-1, 3)))
+
+        self.get_clusters(flattened_image)
+        output_image = []
+        for row in resized_image:
+            rows = []
+            for col in row:
+                rows.append(self.get_cluster_center(list(col)))
+            output_image.append(rows)    
+        output_image = np.array(output_image, np.uint8)
+        output_image = np.clip(output_image, 0, 255).astype(np.uint8)
+        height, width, _ = output_image.shape
+        bytes_per_line = 3 * width
+        q_image = QImage(output_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+
+        # Display
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+#################################################################################################################################################
+
+    def region_growing(self):
+        if self.img is None:
+            return
+        
+        # Get the image in grayscale
+        if self.img.ndim == 3:
+            img_gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        else:
+            img_gray = self.img.copy()
+        
+        # Get threshold value from slider for similarity criterion
+        tolerance = self.threshold_slider.value()
+        if tolerance == 0:
+            tolerance = 10  # Default tolerance if slider is at 0
+        
+        # Get the dimensions of the image
+        height, width = img_gray.shape
+        
+        # Initialize segmentation result
+        segmented = np.zeros_like(img_gray, dtype=np.uint8)
+        visited = np.zeros_like(img_gray, dtype=bool)
+        
+        # Calculate seed points
+        # We'll place seeds in a grid pattern across the image
+        grid_size = 30  # Distance between seed points
+        region_id = 1
+        
+        for y in range(0, height, grid_size):
+            for x in range(0, width, grid_size):
+                if not visited[y, x]:
+                    # Initialize region growing from this seed
+                    region = np.zeros_like(img_gray, dtype=bool)
+                    stack = [(y, x)]
+                    seed_value = int(img_gray[y, x])
+                    
+                    while stack:
+                        cy, cx = stack.pop()
+                        
+                        # Skip if outside image bounds or already visited
+                        if (cy < 0 or cy >= height or cx < 0 or cx >= width or 
+                                visited[cy, cx] or region[cy, cx]):
+                            continue
+                        
+                        # Check if pixel is similar to seed
+                        current_value = int(img_gray[cy, cx])
+                        if abs(current_value - seed_value) <= tolerance:
+                            region[cy, cx] = True
+                            visited[cy, cx] = True
+                            
+                            # Add neighbors to stack
+                            stack.append((cy-1, cx))  # Up
+                            stack.append((cy+1, cx))  # Down
+                            stack.append((cy, cx-1))  # Left
+                            stack.append((cy, cx+1))  # Right
+                    
+                    # Add the region to the segmentation result
+                    if np.any(region):
+                        segmented[region] = region_id
+                        region_id += 1
+        
+        # Scale to 0-255 for better visualization
+        if np.max(segmented) > 0:
+            scale_factor = 255.0 / np.max(segmented)
+            segmented = (segmented * scale_factor).astype(np.uint8)
+        
+        # Apply a random color to each region for better visualization
+        if region_id > 1:
+            # Create a colormap
+            colormap = np.zeros((region_id, 3), dtype=np.uint8)
+            # First region is background (black)
+            colormap[1:] = np.random.randint(0, 255, size=(region_id-1, 3))
+            
+            # Create colored segmentation
+            colored_segmentation = np.zeros((height, width, 3), dtype=np.uint8)
+            for i in range(1, region_id):
+                colored_segmentation[segmented == int(i * scale_factor)] = colormap[i]
+            
+            # Convert to QImage for display
+            colored_rgb = cv2.cvtColor(colored_segmentation, cv2.COLOR_BGR2RGB)
+            q_image = QImage(colored_rgb.data, width, height, 3 * width, QImage.Format_RGB888)
+        else:
+            # Grayscale output if no regions found
+            q_image = QImage(segmented.data, width, height, width, QImage.Format_Grayscale8)
+        
+        # Convert QImage to QPixmap and display
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+####################################################################################################################################################
     def optimal(self):
         if self.img is None:
             return
         if self.img.ndim == 3:
             img_proc = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+            img_proc = cv2.resize(img_proc, (256,256))
         else:
             img_proc = self.img.copy()
+            img_proc = cv2.resize(img_proc, (256,256))
 
         cornerSize = 10  # Corner size
 
@@ -207,7 +649,7 @@ class CVApp(QWidget):
         self.output_view.setScene(scene)
 
 
-
+##################################################################################################################################
     def otsu(self):
         if self.img is None:
             return
@@ -247,9 +689,12 @@ class CVApp(QWidget):
         scene = QGraphicsScene()
         scene.addItem(QGraphicsPixmapItem(q_pixmap))
         self.output_view.setScene(scene)
-
-    def spectral(self, image, num_bands=3, max_iterations=5):
-
+###########################################################################################################################################
+    def spectral(self):
+        num_bands=3
+        #max_iterations=5
+        max_iterations = self.iterations_slider.value()  # Get from slider
+        image=self.img
         if len(image.shape) > 2:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -398,6 +843,7 @@ class CVApp(QWidget):
             scene = QGraphicsScene()
             scene.addItem(QGraphicsPixmapItem(q_pixmap))
             self.output_view.setScene(scene)
+##############################################################################################################################################################
     def local(self):# adaptive mean thresholding
         if self.img is None:
             return
