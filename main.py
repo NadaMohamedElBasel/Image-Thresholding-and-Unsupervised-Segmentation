@@ -47,6 +47,7 @@ class CVApp(QWidget):
         
         layout.addLayout(image_layout)
         
+        
         self.load_image_button = QPushButton("Load Image")
         self.load_image_button.clicked.connect(self.load_image)
         # Thresholding Controls
@@ -55,9 +56,25 @@ class CVApp(QWidget):
 
         # Global threshold buttons
         self.otsu_button = QPushButton("Global OTSU")
+
+        # Global threshold buttons
+        self.otsu_button = QPushButton("Global OTSU")
         self.otsu_button.clicked.connect(self.otsu)
         self.optimal_button = QPushButton("Global Optimal")
+        self.optimal_button = QPushButton("Global Optimal")
         self.optimal_button.clicked.connect(self.optimal)
+        self.spectral_button = QPushButton("Global Spectral")
+        self.spectral_button.clicked.connect(self.spectral)
+
+        # Local threshold buttons
+        self.local_otsu_button = QPushButton("Local OTSU")
+        self.local_otsu_button.clicked.connect(self.local_otsu)
+        self.local_optimal_button = QPushButton("Local Optimal")
+        self.local_optimal_button.clicked.connect(self.local_optimal)
+        self.local_spectral_button = QPushButton("Local Spectral")
+        self.local_spectral_button.clicked.connect(self.local_spectral)
+
+        # Threshold slider
         self.spectral_button = QPushButton("Global Spectral")
         self.spectral_button.clicked.connect(self.spectral)
 
@@ -74,6 +91,8 @@ class CVApp(QWidget):
         self.threshold_slider.setRange(0, 255)
         self.threshold_value = QLabel("0")
         self.threshold_slider.valueChanged.connect(lambda: self.threshold_value.setText(str(self.threshold_slider.value())))
+
+        # Local threshold parameters
 
         # Local threshold parameters
         self.spin_block_size = QSpinBox()
@@ -95,6 +114,18 @@ class CVApp(QWidget):
         threshold_layout.addWidget(self.local_optimal_button, 1, 1,1,1)
         threshold_layout.addWidget(self.local_spectral_button, 1, 2,1,1)
 
+        # Add widgets to layout
+        threshold_layout.addWidget(self.otsu_button, 0, 0,1,1)
+        threshold_layout.addWidget(self.optimal_button, 0, 1,1,1)
+        threshold_layout.addWidget(self.spectral_button, 0, 2,1,1)
+
+        threshold_layout.addWidget(self.local_otsu_button, 1, 0,1,1)
+        threshold_layout.addWidget(self.local_optimal_button, 1, 1,1,1)
+        threshold_layout.addWidget(self.local_spectral_button, 1, 2,1,1)
+
+        threshold_layout.addWidget(QLabel("Threshold:"), 2, 0)
+        threshold_layout.addWidget(self.threshold_slider, 2, 1, 1, 2)
+        threshold_layout.addWidget(self.threshold_value, 2, 3)
         threshold_layout.addWidget(QLabel("Threshold:"), 2, 0)
         threshold_layout.addWidget(self.threshold_slider, 2, 1, 1, 2)
         threshold_layout.addWidget(self.threshold_value, 2, 3)
@@ -102,9 +133,13 @@ class CVApp(QWidget):
         threshold_layout.addWidget(self.spin_block_size, 3, 1,1,1)
         threshold_layout.addWidget(self.spin_offset, 3, 2,1,1)
 
+        threshold_layout.addWidget(self.spin_block_size, 3, 1,1,1)
+        threshold_layout.addWidget(self.spin_offset, 3, 2,1,1)
+
         threshold_group.setLayout(threshold_layout)
         layout.addWidget(self.load_image_button)
         layout.addWidget(threshold_group)
+                
                 
         # Segmentation Controls
         segmentation_group = QGroupBox("Segmentation")
@@ -125,6 +160,7 @@ class CVApp(QWidget):
         self.iterations_slider.setRange(1, 100)
         self.iterations_value = QLabel("5")
         self.iterations_slider.valueChanged.connect(lambda: self.iterations_value.setText(str(self.iterations_slider.value())))
+        self.iterations_slider.setValue(5)  
         self.iterations_slider.setValue(5)  
         
         self.clusters_slider = QSlider(Qt.Horizontal)
@@ -157,16 +193,20 @@ class CVApp(QWidget):
             return
 
         
+        
         img = cv2.imread(file_path)
         self.img = img
         self.img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  
 
+        
         
         height, width, channel = img_rgb.shape
         bytes_per_line = 3 * width
         q_image = QImage(img_rgb.data, width, height, bytes_per_line, QImage.Format_RGB888)
 
+       
        
         q_pixmap = QPixmap.fromImage(q_image)
 
@@ -179,6 +219,11 @@ class CVApp(QWidget):
         if not hasattr(self, 'img') or self.img is None:
             print("No image loaded!")
             return
+
+        bandwidth = 30  
+      
+        max_iterations = self.iterations_slider.value()  
+        convergence_threshold = 1  
 
         bandwidth = 30  
       
@@ -198,6 +243,7 @@ class CVApp(QWidget):
                 within_bandwidth = flattened_image[distances < bandwidth]
 
                 if len(within_bandwidth) > 0:
+                
                 
                     mean_point = np.mean(within_bandwidth, axis=0)
                     new_points.append(mean_point)
@@ -264,6 +310,7 @@ class CVApp(QWidget):
                     new_centroid = centroids[k]
                 new_centroids.append(new_centroid)
             new_centroids = np.array(new_centroids, dtype=np.float32)
+        
         
             if np.allclose(centroids, new_centroids, atol=1e-4):
                 break
@@ -430,6 +477,7 @@ class CVApp(QWidget):
             img_proc = cv2.resize(img_proc, (256,256))
 
         cornerSize = 10 
+        cornerSize = 10 
 
         top_left = img_proc[:cornerSize, :cornerSize]
         top_right = img_proc[:cornerSize, -cornerSize:]
@@ -448,6 +496,7 @@ class CVApp(QWidget):
 
             if len(background) == 0 or len(object) == 0:
                 break  
+                break  
 
             mu_b = np.mean(background)
             mu_o = np.mean(object)
@@ -462,6 +511,7 @@ class CVApp(QWidget):
 
         height, width = thresh_img.shape
         bytes_per_line = width  
+        bytes_per_line = width  
         q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
 
         q_pixmap = QPixmap.fromImage(q_image)
@@ -469,6 +519,46 @@ class CVApp(QWidget):
         scene.addItem(QGraphicsPixmapItem(q_pixmap))
         self.output_view.setScene(scene)
 
+    def local_optimal(self):
+        if self.img is None:
+            return
+
+        if self.img.ndim == 3:
+            img_proc = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        else:
+            img_proc = self.img.copy()
+
+        block_size = self.spin_block_size.value()
+        if block_size % 2 == 0:
+            block_size += 1
+
+        pad = block_size // 2
+        padded_img = cv2.copyMakeBorder(img_proc, pad, pad, pad, pad, cv2.BORDER_REFLECT)
+        thresh_img = np.zeros_like(img_proc)
+
+        for i in range(thresh_img.shape[0]):
+            for j in range(thresh_img.shape[1]):
+                block = padded_img[i:i+block_size, j:j+block_size]
+                threshold = np.mean(block)
+                for _ in range(10):
+                    background = block[block <= threshold]
+                    obj = block[block > threshold]
+                    if len(background) == 0 or len(obj) == 0:
+                        break
+                    mu_b = np.mean(background)
+                    mu_o = np.mean(obj)
+                    new_threshold = (mu_b + mu_o) / 2
+                    if abs(new_threshold - threshold) < 0.5:
+                        break
+                    threshold = new_threshold
+                thresh_img[i, j] = 255 if img_proc[i, j] > threshold else 0
+        height, width = thresh_img.shape
+        bytes_per_line = width
+        q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
     def local_optimal(self):
         if self.img is None:
             return
@@ -541,6 +631,55 @@ class CVApp(QWidget):
 
         height, width = thresh_img.shape
         bytes_per_line = width 
+        bytes_per_line = width 
+        q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+        q_pixmap = QPixmap.fromImage(q_image)
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsPixmapItem(q_pixmap))
+        self.output_view.setScene(scene)
+
+    def local_otsu(self):
+        if self.img is None:
+            return
+
+        if self.img.ndim == 3:
+            img_proc = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        else:
+            img_proc = self.img.copy()
+
+        block_size = self.spin_block_size.value()
+        if block_size % 2 == 0:
+            block_size += 1
+
+        pad = block_size // 2
+        padded_img = cv2.copyMakeBorder(img_proc, pad, pad, pad, pad, cv2.BORDER_REFLECT)
+        thresh_img = np.zeros_like(img_proc)
+
+        for i in range(thresh_img.shape[0]):
+            for j in range(thresh_img.shape[1]):
+                block = padded_img[i:i+block_size, j:j+block_size].flatten()
+                hist, _ = np.histogram(block, bins=256, range=(0, 256))
+                total = block.size
+                sum_total = np.dot(np.arange(256), hist)
+                sumB, wB, max_var, threshold = 0, 0, 0, 0
+                for t in range(256):
+                    wB += hist[t]
+                    if wB == 0:
+                        continue
+                    wF = total - wB
+                    if wF == 0:
+                        break
+                    sumB += t * hist[t]
+                    mB = sumB / wB
+                    mF = (sum_total - sumB) / wF
+                    between_var = wB * wF * (mB - mF) ** 2
+                    if between_var > max_var:
+                        max_var = between_var
+                        threshold = t
+                thresh_img[i, j] = 255 if img_proc[i, j] > threshold else 0
+
+        height, width = thresh_img.shape
+        bytes_per_line = width
         q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
         q_pixmap = QPixmap.fromImage(q_image)
         scene = QGraphicsScene()
@@ -598,11 +737,13 @@ class CVApp(QWidget):
     def spectral(self):
         num_bands=3
         max_iterations = self.iterations_slider.value()  
+        max_iterations = self.iterations_slider.value()  
         image=self.img
         if len(image.shape) > 2:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         bands = [image]
         for i in range(1, num_bands):
+            kernel_size = 2 * i + 1  
             kernel_size = 2 * i + 1  
             bands.append(cv2.GaussianBlur(image, (kernel_size, kernel_size), 0))
 
@@ -615,14 +756,17 @@ class CVApp(QWidget):
             new_regions = []
 
             if not regions: 
+            if not regions: 
                 break
 
             for region_mask in regions:
                 should_segment_further = True
 
                 
+                
                 sub_regions_per_band = []
                 for band in bands:
+                    
                     
                     region_pixels = band[region_mask]
 
@@ -631,9 +775,12 @@ class CVApp(QWidget):
                         break
 
                    
+                   
                     hist = cv2.calcHist([region_pixels], [0], None, [256], [0, 256])
                     hist = hist.flatten() / len(region_pixels) 
+                    hist = hist.flatten() / len(region_pixels) 
 
+                    
                     
                     hist_smoothed = cv2.GaussianBlur(hist, (5, 1), 0)
 
@@ -666,6 +813,7 @@ class CVApp(QWidget):
                         should_segment_further = False
                         break
 
+                   
                    
                     left_mask = np.zeros_like(region_mask, dtype=bool)
                     middle_mask = np.zeros_like(region_mask, dtype=bool)
@@ -722,6 +870,7 @@ class CVApp(QWidget):
             thresh_img = segmentation_result
             height, width = thresh_img.shape
             bytes_per_line = width  
+            bytes_per_line = width  
             q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
 
             q_pixmap = QPixmap.fromImage(q_image)
@@ -730,13 +879,17 @@ class CVApp(QWidget):
             self.output_view.setScene(scene)
 
     def local_spectral(self):
+
+    def local_spectral(self):
         if self.img is None:
             return
+
 
         if self.img.ndim == 3:
             img_proc = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
         else:
             img_proc = self.img.copy()
+
 
         block_size = self.spin_block_size.value()
         if block_size % 2 == 0:
@@ -788,10 +941,58 @@ class CVApp(QWidget):
         height, width = thresh_img.shape
         bytes_per_line = width
         q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+
+        pad = block_size // 2
+        padded_img = cv2.copyMakeBorder(img_proc, pad, pad, pad, pad, cv2.BORDER_REFLECT)
+        thresh_img = np.zeros_like(img_proc)
+
+        for i in range(thresh_img.shape[0]):
+            for j in range(thresh_img.shape[1]):
+                block = padded_img[i:i+block_size, j:j+block_size]
+                block = block.astype(np.uint8)
+
+                # Create bands
+                bands = [block]
+                for k in range(1, 3):
+                    bands.append(cv2.GaussianBlur(block, (2 * k + 1, 2 * k + 1), 0))
+
+                decision = 0
+                for band in bands:
+                    region_pixels = band.flatten()
+                    hist = cv2.calcHist([region_pixels], [0], None, [256], [0, 256]).flatten()
+                    hist = hist / np.sum(hist)
+                    hist_smoothed = cv2.GaussianBlur(hist, (5, 1), 0)
+
+                    peaks = [i for i in range(1, 255) if hist_smoothed[i] > hist_smoothed[i-1] and hist_smoothed[i] > hist_smoothed[i+1]]
+                    if len(peaks) <= 1:
+                        decision += 0
+                        continue
+
+                    peak_idx = max(peaks, key=lambda x: hist_smoothed[x])
+                    left = next((i for i in range(peak_idx, 0, -1) if hist_smoothed[i] < hist_smoothed[i-1] and hist_smoothed[i] < hist_smoothed[i+1]), None)
+                    right = next((i for i in range(peak_idx, 255) if hist_smoothed[i] < hist_smoothed[i-1] and hist_smoothed[i] < hist_smoothed[i+1]), None)
+
+                    if left is None or right is None:
+                        decision += 0
+                        continue
+
+                    val = band[pad, pad]
+                    if val < left:
+                        decision += 0
+                    elif val > right:
+                        decision += 255
+                    else:
+                        decision += 127
+
+                thresh_img[i, j] = 255 if decision / len(bands) > 127 else 0
+        height, width = thresh_img.shape
+        bytes_per_line = width
+        q_image = QImage(thresh_img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
         q_pixmap = QPixmap.fromImage(q_image)
         scene = QGraphicsScene()
         scene.addItem(QGraphicsPixmapItem(q_pixmap))
         self.output_view.setScene(scene)
+##############################################################################################################################################################
 ##############################################################################################################################################################
 
 if __name__ == "__main__":
